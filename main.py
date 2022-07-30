@@ -13,17 +13,16 @@ from selenium.common.exceptions import NoSuchElementException
 import requests
 from collections import namedtuple
 from os import mkdir
+from os import path
+from os import rmdir
 from pathlib import Path
+import re
 
 
-#No harm in having this global...yet
-login_url = "https://oeaaa.faa.gov/oeaaa/external/userMgmt/permissionAction.jsp?action=showLoginForm"
+#Todo make not global
+scraper_info = None
 
-#Todo make this secure
-username = ""
-password = ""
-
-TEST_DIRECTORY = "test_directory" #all test output files go here
+TEST_DIRECTORY = "output_directory" #all test output files go here
 
 
 
@@ -34,6 +33,18 @@ Case_Data = namedtuple("Case_Data", "struct_name link letter_name")
 #TODO determine when you need to return the Driver and when you can work with just the driver return value
 CASES_NUM_CELLS_PER_ROW = 7 #Each case row has 7 cells
 
+
+'''
+Data class that stores important information we need to traverse the website
+'''
+class Scraper_Info:
+    def __init__(self,login_url,uname,pword,off_airport_url,on_airport_url):
+        self.login_url = login_url
+        self.uname = uname
+        self.pword = pword
+        self.off_airport_url = off_airport_url
+        self.on_airport_url = on_airport_url
+        
 '''
 A project can have one or more cases.
 The Project_Information class contains a list of namedtuples 
@@ -53,8 +64,18 @@ class Project_Information():
         
     def add_case_data(self,struct_name,link,letter_name):
         
-
+        '''
+        Don't allow \ and / in the struct name. The filename is the struct name, and those will mess with writing to files'
+        case.struct_name.replace("/","_")case.struct_name.replace("/","_")
+        '''
+        
+        #Probably don't need the firs twoo string replaces, but for now it works and I don't want to touch it at the moment
+        struct_name = struct_name.replace("/","_")
+        struct_name = struct_name.replace("\\","_")
+        struct_name = ''.join(filter(str.isalnum, struct_name ))
         self.cases.append(Case_Data(struct_name,link,letter_name))
+        
+    
         
         
     def write_cases_to_folder(self):
@@ -62,34 +83,37 @@ class Project_Information():
         
         '''
     
-        
+
         if self.project_folder == None:
-            print("Project folder for " + self.project_name + " Has not been created yet")
+            a = 3
+            #print("Project folder for " + self.project_name + " Has not been created yet")
         else:
             for case in self.cases:
                 
                 #Todo handle duplicate names..I.E, Crane, Crane, Crane should be Crane_1,Crane_2,Crane_3
                 #Want the file to be stored in the path self.project_name\case.struct_name
-                outfilename = self.project_folder + "\\" + str(case.struct_name) + ".pdf"
-                response = requests.get(case.link)
-                file = open(outfilename, "wb")
-                file.write(response.content)
-                file.close()
                 
-                print(outfilename)
+                #Need to remove special characters in the string because that will cause problem with filewrites
+                
+           
+
+                
+                
+                outfilename = self.project_folder + "\\" + str(case.struct_name) + ".pdf"
+                # outfilename = str(case.struct_name) + ".pdf"
+                response = requests.get(case.link)
+                try:
+                    file = open(outfilename, "wb")
+                    file.write(response.content)
+                    file.close()
+                except FileNotFoundError:
+                    print("error reading file " + outfilename)
+                
+   
+                # print(outfilename)
                 a = 3
                 
-                
-                
-                    # #todo uncomment later, disabled currently for testing
-    # for i,case in enumerate(cases_list):
-    #     outfilename = fname + str(file_counter) + ".pdf"
-    #     response = requests.get(case.link)
-    #     file = open(outfilename, "wb")
-    #     file.write(response.content)
-    #     file.close()
-    #     file_counter += 1
-   
+
                 
         
         
@@ -103,12 +127,20 @@ class Project_Information():
         #Do some checks here to see if the directory was created successfully...but for now, let's just assume it was created and
         #assign the project_name to the project folder
         #also using a test directory for now, remove later
+        
         self.project_folder = TEST_DIRECTORY + "\\" + self.project_name
         
-        try:
+        if path.exists(self.project_folder) == False:
             mkdir(self.project_folder)
-        except FileExistsError:
-            print("Dir already exists")
+            
+        
+        
+        # self.project_folder = TEST_DIRECTORY + "\\" + self.project_name
+        
+        # try:
+        #     mkdir(self.project_folder)
+        # except FileExistsError:
+        #     print("Dir already exists")
         
 
         
@@ -121,10 +153,14 @@ def write_projects_to_folder(all_projects):
         proj.create_folder()
         proj.write_cases_to_folder()
         
+    a = 3
+        
     
 
 def read_configuration_file():
-    login_url, username,password = "","",""
+    login_url, username,password,det_off_aiport,determined_on_airport = "","","","",""
+    
+    global scraper_info
     '''
     Very basic configuration reading right now. Add error checking todo
     '''
@@ -133,24 +169,37 @@ def read_configuration_file():
         with open('conf_file.txt') as cfgfile:
             login_url = cfgfile.readline().split("=")[1].strip()
             username = cfgfile.readline().split("=")[1].strip()
-            password = cfgfile.readline().split("=")[1].strip()            
+            password = cfgfile.readline().split("=")[1].strip()        
+            det_off_aiport = cfgfile.readline().split("=")[1].strip() 
+            determined_on_airport = cfgfile.readline().split("=")[1].strip() 
+            scraper_info = Scraper_Info(login_url,username,password,det_off_aiport,determined_on_airport)
+            return True
+            
     except FileNotFoundError:
         print("config file does not exist")
-    return login_url,username,password
+        return False
+  
+def init_data():
+    
+    #Todo, use a different output directory
+    if path.exists(TEST_DIRECTORY):
+        rmdir(TEST_DIRECTORY)
+        
+    mkdir(TEST_DIRECTORY)
     
 
 def login_to_page():
 
 
-
+    global scraper_info #todo make not global
     
-    login_url,uname,pword = read_configuration_file()
+    read_configuration_file()
    
     #TODO figure out whether you have to close the driver
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
     
     '''Log into the website by looking for the name tag of the HTML that takes the username and password info'''
-    driver.get(login_url)
+    driver.get(scraper_info.login_url)
     driver.find_element(By.NAME,"loginForm")
             
     #TODO don't hard code element names
@@ -158,18 +207,20 @@ def login_to_page():
     password_input = driver.find_element(By.NAME,"drowssap")
     login_button = driver.find_element(By.NAME,"submitButton")
     
-    username_input.send_keys(uname)
-    password_input.send_keys(pword)
+    username_input.send_keys(scraper_info.uname)
+    password_input.send_keys(scraper_info.pword)
     login_button.click()
     return driver
 
-
+#TODO need to search both on and off airport construction
 def go_to_determined_cases(driver):
     '''
     TODO expand into function that takes as input the link text (I.E, Add Letter, accepted, etc)
     '''
     driver.find_element(By.LINK_TEXT,"Determined").click()
-    
+
+def go_to_url(driver,url):
+    driver.get(url)    
     
 def process_determined_table(driver):
     ROW_SIZE = 11
@@ -253,7 +304,7 @@ def read_all_cases_on_page(driver,project_name):
         letter_name = table_rows[CASES_NUM_CELLS_PER_ROW-1].text
         
         project_info.add_case_data(structure_name,letter_link,letter_name)
-        case_list.append(project_info)
+  
         
     else:
         
@@ -262,12 +313,12 @@ def read_all_cases_on_page(driver,project_name):
             try:
 
                 
-                structure_name = table_rows[0].text.split("\n")[0].strip()
-                letter_link = table_rows[CASES_NUM_CELLS_PER_ROW-1].find_element(By.TAG_NAME,'a').get_property('href')
-                letter_name = table_rows[CASES_NUM_CELLS_PER_ROW-1].text
+                structure_name = table_rows[i].text.split("\n")[0].strip()
+                letter_link = table_rows[i+CASES_NUM_CELLS_PER_ROW-1].find_element(By.TAG_NAME,'a').get_property('href')
+                letter_name = table_rows[i+CASES_NUM_CELLS_PER_ROW-1].text
                 
                 project_info.add_case_data(structure_name,letter_link,letter_name)
-                case_list.append(project_info)
+           
     
          
             except NoSuchElementException:
@@ -281,12 +332,12 @@ def read_all_cases_on_page(driver,project_name):
         letter_link = table_rows[num_rows+(CASES_NUM_CELLS_PER_ROW-1)].find_element(By.TAG_NAME,'a').get_property('href')
         letter_name = table_rows[CASES_NUM_CELLS_PER_ROW-1].text
         project_info.add_case_data(structure_name,letter_link,letter_name)
-        case_list.append(project_info)
+       
         
 
             
     driver.back()     
-    return case_list
+    return project_info
 
 '''
 On the project summary page, the first column of each row is the structure name. The string will look something like this:
@@ -302,56 +353,45 @@ def get_structure_name(project_sum_struct_name):
 
 
 
-    
+
     
 all_letter_links = []
 driver = login_to_page()
 go_to_determined_cases(driver)
+# go_to_url(driver,scraper_info.off_airport_url)
 
 
 pages = get_page_links(driver)
 
 
+'''
 
-# letter_links = get_letter_links(driver)
+'''
 
-fname = "letter"
-
-firstIt = True;
+#Gets the index of the = sign, which 
 
 file_counter = 0
 for p in pages:
 
-    project_list = get_letter_links(driver) #Cases_list will contain all of the projects from a page
-    
-    #Flatten the list. This shouldn't really have to be flattened, but we have to do that for now todo figure out why it needs to be flattened
+    projs = get_letter_links(driver) #Cases_list will contain all of the projects from a page    
+    write_projects_to_folder(projs)
 
-    project_list = [p for project in project_list for p in project]
-    
-    write_projects_to_folder(project_list)
 
-    
-
-    
 
         
-    print()
+    print("Getting new page")
     
-    # #todo uncomment later, disabled currently for testing
-    # for i,case in enumerate(cases_list):
-    #     outfilename = fname + str(file_counter) + ".pdf"
-    #     response = requests.get(case.link)
-    #     file = open(outfilename, "wb")
-    #     file.write(response.content)
-    #     file.close()
-    #     file_counter += 1
     driver.get(p)
     
+    
+    print("Got new page")
+    
+#Todo check if files and folder have been created already
+#todo try driver.get(p) for certain duration, and if it doesn't work, report which page it failed on
 
-
-
+print("Done")
     
     
-#todo is there an off by one error?
+
 
 
